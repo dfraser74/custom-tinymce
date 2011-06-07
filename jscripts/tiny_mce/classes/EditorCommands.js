@@ -186,6 +186,7 @@
 				});
 
 				toggleFormat('align' + align);
+				execCommand('mceRepaint');
 			},
 
 			// Override list commands to fix WebKit bug
@@ -211,7 +212,7 @@
 			},
 
 			// Override commands to use the text formatter engine
-			'Bold,Italic,Underline,Strikethrough' : function(command) {
+			'Bold,Italic,Underline,Strikethrough,Superscript,Subscript' : function(command) {
 				toggleFormat(command);
 			},
 
@@ -284,7 +285,115 @@
 			},
 
 			mceInsertContent : function(command, ui, value) {
-				selection.setContent(value);
+				var caretNode, rng, rootNode, parent, node, rng, nodeRect, viewPortRect, args;
+
+				function findSuitableCaretNode(node, root_node, next) {
+					var walker = new tinymce.dom.TreeWalker(next ? node.nextSibling : node.previousSibling, root_node);
+
+					while ((node = walker.current())) {
+						if ((node.nodeType == 3 && tinymce.trim(node.nodeValue).length) || node.nodeName == 'BR' || node.nodeName == 'IMG')
+							return node;
+
+						if (next)
+							walker.next();
+						else
+							walker.prev();
+					}
+				};
+
+				args = {content: value, format: 'html'};
+				selection.onBeforeSetContent.dispatch(selection, args);
+				value = args.content;
+
+				// Add caret at end of contents if it's missing
+				if (value.indexOf('{$caret}') == -1)
+					value += '{$caret}';
+
+				// Set the content at selection to a span and replace it's contents with the value
+				selection.setContent('<span id="__mce">\uFEFF</span>', {no_events : false});
+				dom.setOuterHTML('__mce', value.replace(/\{\$caret\}/, '<span data-mce-type="bookmark" id="__mce">\uFEFF</span>'));
+
+				caretNode = dom.select('#__mce')[0];
+				rootNode = dom.getRoot();
+
+				// Move the caret into the last suitable location within the previous sibling if it's a block since the block might be split
+				if (caretNode.previousSibling && dom.isBlock(caretNode.previousSibling) || caretNode.parentNode == rootNode) {
+					node = findSuitableCaretNode(caretNode, rootNode);
+					if (node) {
+						if (node.nodeName == 'BR')
+							node.parentNode.insertBefore(caretNode, node);
+						else
+							dom.insertAfter(caretNode, node);
+					}
+				}
+
+				// Find caret root parent and clean it up using the serializer to avoid nesting
+				while (caretNode) {
+					if (caretNode === rootNode) {
+						// Clean up the parent element by parsing and serializing it
+						// This will remove invalid elements/attributes and fix nesting issues
+						dom.setOuterHTML(parent, 
+							new tinymce.html.Serializer({}, editor.schema).serialize(
+								editor.parser.parse(dom.getOuterHTML(parent))
+							)
+						);
+
+						break;
+					}
+
+					parent = caretNode;
+					caretNode = caretNode.parentNode;
+				}
+
+				// Find caret after cleanup and move selection to that location
+				caretNode = dom.select('#__mce')[0];
+				if (caretNode) {
+					node = findSuitableCaretNode(caretNode, rootNode) || findSuitableCaretNode(caretNode, rootNode, true);
+					dom.remove(caretNode);
+
+					if (node) {
+						rng = dom.createRng();
+
+						if (node.nodeType == 3) {
+							rng.setStart(node, node.length);
+							rng.setEnd(node, node.length);
+						} else {
+							if (node.nodeName == 'BR') {
+								rng.setStartBefore(node);
+								rng.setEndBefore(node);
+							} else {
+								rng.setStartAfter(node);
+								rng.setEndAfter(node);
+							}
+						}
+
+						selection.setRng(rng);
+
+						// Scroll range into view scrollIntoView on element can't be used since it will scroll the main view port as well
+						if (!tinymce.isIE) {
+							node = dom.create('span', null, '\u00a0');
+							rng.insertNode(node);
+							nodeRect = dom.getRect(node);
+							viewPortRect = dom.getViewPort(editor.getWin());
+
+							// Check if node is out side the viewport if it is then scroll to it
+							if ((nodeRect.y > viewPortRect.y + viewPortRect.h || nodeRect.y < viewPortRect.y) ||
+								(nodeRect.x > viewPortRect.x + viewPortRect.w || nodeRect.x < viewPortRect.x)) {
+								editor.getBody().scrollLeft = nodeRect.x;
+								editor.getBody().scrollTop = nodeRect.y;
+							}
+
+							dom.remove(node);
+						}
+
+						// Make sure that the selection is collapsed after we removed the node fixes a WebKit bug
+						// where WebKit would place the endContainer/endOffset at a different location than the startContainer/startOffset
+						selection.collapse(true);
+					}
+				}
+
+				selection.onSetContent.dispatch(selection, args);
+				editor.addVisual();
 			},
 
 			mceInsertRawHTML : function(command, ui, value) {
@@ -339,7 +448,7 @@
 			},
 
 			InsertHorizontalRule : function() {
-				selection.setContent('<hr />');
+				editor.execCommand('mceInsertContent', false, '<hr />');
 			},
 
 			mceToggleVisualAid : function() {
@@ -348,18 +457,36 @@
 			},
 
 			mceReplaceContent : function(command, ui, value) {
-				selection.setContent(value.replace(/\{\$selection\}/g, selection.getContent({format : 'text'})));
+				editor.execCommand('mceInsertContent', false, value.replace(/\{\$selection\}/g, selection.getContent({format : 'text'})));
 			},
 
 			mceInsertLink : function(command, ui, value) {
-				var link = dom.getParent(selection.getNode(), 'a');
+				var link = dom.getParent(selection.getNode(), 'a'), img, floatVal;
 
 				if (tinymce.is(value, 'string'))
 					value = {href : value};
 
+				// Spaces are never valid in URLs and it's a very common mistake for people to make so we fix it here.
+				value.href = value.href.replace(' ', '%20');
+
 				if (!link) {
+					// WebKit can't create links on float images for some odd reason so just remove it and restore it later
+					if (tinymce.isWebKit) {
+						img = dom.getParent(selection.getNode(), 'img');
+
+						if (img) {
+							floatVal = img.style.cssFloat;
+							img.style.cssFloat = null;
+						}
+					}
+
 					execNativeCommand('CreateLink', FALSE, 'javascript:mctmp(0);');
-					each(dom.select('a[href=javascript:mctmp(0);]'), function(link) {
+
+					// Restore float value
+					if (floatVal)
+						img.style.cssFloat = floatVal;
+
+					each(dom.select("a[href='javascript:mctmp(0);']"), function(link) {
 						dom.setAttribs(link, value);
 					});
 				} else {
@@ -387,7 +514,7 @@
 				return isFormatMatch('align' + command.substring(7));
 			},
 
-			'Bold,Italic,Underline,Strikethrough' : function(command) {
+			'Bold,Italic,Underline,Strikethrough,Superscript,Subscript' : function(command) {
 				return isFormatMatch(command);
 			},
 
