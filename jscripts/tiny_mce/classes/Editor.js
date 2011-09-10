@@ -977,7 +977,8 @@
 			// Load scripts
 			function loadScripts() {
 				if (s.language && s.language_load !== false)
-					sl.add(tinymce.baseURL + '/langs/' + s.language + '.js');
+					//sl.add(tinymce.baseURL + '/langs/' + s.language + '.js');
+                    sl.add(tinymce.baseURL + '/../../extra/strings.php?elanguage=' + s.language + '&etheme=' + s.theme); // Moodle modification - load one huge strings file
 
 				if (s.theme && s.theme.charAt(0) != '-' && !ThemeManager.urls[s.theme])
 					ThemeManager.load(s.theme, 'themes/' + s.theme + '/editor_template' + tinymce.suffix + '.js');
