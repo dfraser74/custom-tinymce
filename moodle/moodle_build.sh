@@ -4,9 +4,9 @@
 #maintained by Petr Skoda
 
 #edit following to match your git checkouts
-SOURCEDIR=/Users/skodak/server/workspace/tinymce
-TARGETDIR=/Users/skodak/server/workspace/moodle20/lib/editor/tinymce/tiny_mce/3.3.9.2
-SPELLDIR=/Users/skodak/server/workspace/tinymce_spellchecker_php
+SOURCEDIR=/Users/skodak/server/workspace/custom-tinymce
+TARGETDIR=/Users/skodak/server/workspace/moodle23/lib/editor/tinymce/tiny_mce/3.5dev1
+SPELLDIR=/Users/skodak/server/workspace/custom-tinymce_spellchecker_php
 
 
 #first build the tinymce project
