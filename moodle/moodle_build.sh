@@ -5,7 +5,7 @@
 
 #edit following to match your git checkouts
 SOURCEDIR=/Users/skodak/server/workspace/custom-tinymce
-TARGETDIR=/Users/skodak/server/workspace/moodle23/lib/editor/tinymce/tiny_mce/3.5
+TARGETDIR=/Users/skodak/server/workspace/moodle23/lib/editor/tinymce/tiny_mce/3.5.4.1
 SPELLDIR=/Users/skodak/server/workspace/custom-tinymce_spellchecker_php
 
 
